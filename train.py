@@ -25,15 +25,25 @@ class emb_trainer():
 				 net_path=None,
 				 neg_sample=True,
 				 early_stop=True,
-				 start_at_1=False
+				 start_at_1=False,
+				 net=None,
+				 pairs_tname=None,
+				 items_tname=None
 				 ):
 		#others
 		self.start_at_1 = start_at_1
+		self.tmp_net = net
 
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		self.pairs_tname = '{}_pairs_train'.format(name)
-		self.items_tname = '{}_items_train'.format(name)
+		if pairs_tname:
+			self.pairs_tname = pairs_tname
+		else:
+			self.pairs_tname = '{}_pairs_train'.format(name)
+		if items_tname:
+			self.items_tname = items_tname
+		else:
+			self.items_tname = '{}_items_train'.format(name)
 
 		#io
 		self.fig_dir = fig_dir
@@ -94,12 +104,14 @@ class emb_trainer():
 		utils.json_dump(self.meta_path, meta)
 
 		#init net
-		if neg_sample:
-			self.net = nets.bilinear(self.n_unique_items, name=name)
-			self.fig_path = os.path.join(self.fig_dir, '{}_neg.png'.format(name))
-			self.model_path = os.path.join(self.model_dir, '{}_trainer_neg.pickle'.format(name))
+		if self.tmp_net:
+			self.net = self.tmp_net(self.n_unique_items, name=name)
 		else:
-			self.net = nets.simple_emb(self.n_unique_items, name=name)
+			if neg_sample:
+				self.net = nets.bilinear(self.n_unique_items, name=name)
+			else:
+				self.net = nets.simple_emb(self.n_unique_items, name=name)
+
 
 		print('Initiated new model')
 
@@ -163,6 +175,7 @@ class emb_trainer():
 			context_i_batch = torch.tensor(context_i_batch, dtype=torch.long)
 			label = torch.tensor(label, dtype=torch.float).unsqueeze(0).view(-1, 1)
 			output = self.net(word_i_batch, context_i_batch)
+			#print(float(output), float(label))
 			loss = self.criterion(output, label)
 
 		else:

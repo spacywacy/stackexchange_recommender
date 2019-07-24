@@ -5,6 +5,7 @@ import pickle
 import os
 import sqlite3
 import numpy as np
+from time import sleep
 
 
 class stack_api_wrapper():
@@ -26,6 +27,7 @@ class stack_api_wrapper():
 		self.n_user_pages = n_user_pages
 		self.user_pagesize = user_pagesize
 		self.n_items_per_user = 100
+		self.delay = 2
 
 		#db
 		self.conn = sqlite3.connect(os.path.join(self.result_dir, db_name))
@@ -68,6 +70,9 @@ class stack_api_wrapper():
 			user_ids += user_ids_in_loop
 			self.n_users_inserted += utils.store_users(json_items, self.user_tname, self.conn)
 
+			#delay
+			sleep(self.delay)
+
 		#cache user id list
 		ids_path = os.path.join(self.result_dir, self.user_ids_fname)
 		utils.pickle_dump(ids_path, user_ids)
@@ -99,15 +104,23 @@ class stack_api_wrapper():
 
 			#get & store data
 			json_items = utils.call_api(url, params)
-			self.n_items_inserted += utils.store_questions(json_items, self.item_tname, self.conn)
+			self.n_items_inserted += utils.store_questions_cache(json_items, self.item_tname, self.conn)
 			ques_ids += [utils.zero_padding(x['question_id']) for x in json_items]
+
+			#delay
+			sleep(self.delay)
+
+
+
+
 
 class pair_builder():
 
 	def __init__(self, name, data_dir, db_name, neg_sample_size):
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		self.items_tname = '{}_items_buffer'.format(name)
+		#self.items_tname = '{}_items_buffer'.format(name)
+		self.items_tname = '{}_items_train'.format(name)
 		self.pairs_tname = '{}_pairs_buffer'.format(name)
 
 		#cache
@@ -120,6 +133,7 @@ class pair_builder():
 		#others
 		self.neg_sample_size = neg_sample_size
 		self.neg_sample_adjust = .75
+		self.drop_singles = False
 		
 
 	def create_pairs(self):
@@ -156,6 +170,7 @@ class pair_builder():
 				print(key, val)
 
 		print('finished grouping')
+		return self.by_user
 
 	def counts_and_probs(self):
 		#get total n_items
@@ -215,6 +230,8 @@ class pair_builder():
 	def get_pairs(self):
 		n_users = 0
 		for item_set in list(self.by_user.values()):
+			#if self.drop_singles and len(item_set)<=2:
+				#continue
 			items = list(item_set)
 			items.sort()
 			self.pairs_by_user(items)

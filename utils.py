@@ -47,7 +47,10 @@ def call_api(url, params, raw=False):
 	if raw:
 		return url_obj
 	else:
-		return json.loads(url_obj)['items']
+		try:
+			return json.loads(url_obj)['items']
+		except:
+			print(url_obj)
 
 def store_users(json_items, tname, conn):
 	cursor = conn.cursor()
@@ -89,6 +92,39 @@ def store_questions(json_items, tname, conn):
 	cursor.close()
 	return n_items
 
+def store_questions_cache(json_items, tname, conn, count_thres=3):
+	cursor = conn.cursor()
+	n_items = 0
+	rows = []
+	count_by_user = {} #user: count
+	cols = ['web_id', 'title', 'belong_to', 'tags', 'view_count', 'answer_count', 'hash_val']
+
+	for question in json_items:
+		web_id = question.get('question_id', None)
+		title = question.get('title', None)
+		belong_to = question.get('owner', {'user_id':None})['user_id']
+		tags = ','.join(question.get('tags', []))
+		view_count = question.get('view_count', None)
+		answer_count = question.get('answer_count', None)
+		row = [web_id, title, belong_to, tags, view_count, answer_count]
+		row_str = ''.join([str(x) for x in row])
+		hash_val = md5(row_str.encode()).hexdigest()
+		row += [hash_val]
+		rows.append(row)
+
+		#get count by user
+		count_by_user[belong_to] = count_by_user.get(belong_to, 0) + 1
+
+	for row in rows:
+		belong_to = row[2]
+		if count_by_user[belong_to] >= count_thres:
+			insert_row(cursor, tname, row, cols=cols, check_key='hash_val', check_key_val=hash_val)
+			n_items+=1
+
+	conn.commit()
+	cursor.close()
+	return n_items
+
 def store_pairs(pairs, tname, conn):
 	cursor = conn.cursor()
 	for pair in pairs:
@@ -100,7 +136,6 @@ def store_pairs(pairs, tname, conn):
 		insert_row(cursor, tname, row, cols=cols)
 	conn.commit()
 	cursor.close()
-
 
 #------------------database----------------------------
 
