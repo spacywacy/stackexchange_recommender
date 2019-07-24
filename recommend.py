@@ -14,10 +14,16 @@ class recommender():
 		self.pairs_tname = '{}_pairs_train'.format(name)
 		self.items_tname = '{}_items_train'.format(name)
 
+		#io
+		self.data_dir = 'storage'
+		self.truth_path = '{}_truth.pickle'.format(name)
+		self.truth_path = os.path.join(self.data_dir, self.truth_path)
+
+		self.top_k = 6
+
 	def load_all_emb(self):
 		cursor = self.conn.cursor()
 		utils.read_table(cursor, self.items_tname, cols=['id', 'embedding'])
-		#utils.read_table(cursor, self.items_tname, cols=['title', 'embedding']) #make sqlite autoincrement starts at 0
 		self.item_ids = []
 		self.embs = []
 		for row in cursor:
@@ -51,7 +57,50 @@ class recommender():
 				nearests.append(data_point)
 
 		cursor.close()
-		return sorted(nearests, key=lambda kv: float(kv[1]), reverse=False)[:top_k]
+		nearests = sorted(nearests, key=lambda kv: float(kv[1]), reverse=False)[:top_k]
+		return [x[0] for x in nearests]
+
+	def get_truth(self):
+		#group by user
+		by_user = {}
+		cursor = self.conn.cursor()
+		utils.read_table(cursor, self.items_tname, cols=['id', 'belong_to'])
+		for row in cursor:
+			item_id = row[0]
+			user_id = row[1]
+			if user_id in by_user:
+				by_user[user_id].add(item_id)
+			else:
+				by_user[user_id] = set([item_id])
+		cursor.close()
+
+		#compile truth
+		truth = {}
+		for group in by_user.values():
+			for item in group:
+				truth[item] = group
+
+		utils.pickle_dump(self.truth_path, truth)
+
+	def verify(self):
+		#load items & truth
+		self.load_all_emb()
+		truth = utils.pickle_load(self.truth_path)
+
+		#calculate 
+		n = 0.0
+		correct = 0.0
+		for i, emb in enumerate(self.embs):
+			ref_vec = self.get_emb(i)
+			nearest_items = set(self.simple_nearest(ref_vec, self.top_k))
+			print(i, nearest_items, truth[i])
+			for item in truth[i]:
+				if item in nearest_items:
+					correct += 1
+				n+=1
+		score = correct/n
+		return score
+
 
 	def tsne_plot(self):
 		self.load_all_emb()

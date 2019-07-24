@@ -23,40 +23,24 @@ class emb_trainer():
 				 n_batch=-1,
 				 name=None,
 				 net_path=None,
-				 neg_sample=True,
-				 early_stop=True,
-				 start_at_1=False,
-				 net=None,
-				 pairs_tname=None,
-				 items_tname=None
+				 early_stop=True
 				 ):
-		#others
-		self.start_at_1 = start_at_1
-		self.tmp_net = net
-
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		if pairs_tname:
-			self.pairs_tname = pairs_tname
-		else:
-			self.pairs_tname = '{}_pairs_train'.format(name)
-		if items_tname:
-			self.items_tname = items_tname
-		else:
-			self.items_tname = '{}_items_train'.format(name)
+		self.pairs_tname = '{}_pairs_train'.format(name)
+		self.items_tname = '{}_items_train'.format(name)
 
 		#io
 		self.fig_dir = fig_dir
 		self.model_dir = model_dir
 		self.data_dir = data_dir
 		self.fig_path = os.path.join(fig_dir, '{}.png'.format(name))
-		self.model_path = os.path.join(model_dir, '{}_trainer.pickle'.format(name))
+		self.model_path = os.path.join(model_dir, '{}_net.pickle'.format(name))
 		self.meta_path = os.path.join(data_dir, '{}_meta.json'.format(name))
 
 		#init net
-		self.neg_sample = neg_sample
 		if name:
-			self.init_new_model(name, neg_sample)
+			self.init_new_model(name)
 		else:
 			self.init_exist_model(net_path)
 
@@ -77,7 +61,7 @@ class emb_trainer():
 
 		
 
-	def init_new_model(self, name, neg_sample):
+	def init_new_model(self, name):
 		#merge buffer data with training data
 		cursor = self.conn.cursor()
 		buffer_pairs_tname = '{}_pairs_buffer'.format(name)
@@ -95,24 +79,13 @@ class emb_trainer():
 			self.item_ids.append(row[0])
 		cursor.close()
 
-		#adjust for starting point
-		if self.start_at_1:
-			self.item_ids = [x-1 for x in self.item_ids]
-
+		#get u_unique_items
 		self.n_unique_items = len(self.item_ids)
-		meta = {'item_ids':self.item_ids}
+		meta = {'n_unique_items':self.n_unique_items}
 		utils.json_dump(self.meta_path, meta)
 
 		#init net
-		if self.tmp_net:
-			self.net = self.tmp_net(self.n_unique_items, name=name)
-		else:
-			if neg_sample:
-				self.net = nets.bilinear(self.n_unique_items, name=name)
-			else:
-				self.net = nets.simple_emb(self.n_unique_items, name=name)
-
-
+		self.net = nets.skip_gram(self.n_unique_items, name=name)
 		print('Initiated new model')
 
 	def init_exist_model(self, net_path):
@@ -122,14 +95,10 @@ class emb_trainer():
 		self.meta_path = os.path.join(self.data_dir, '{}_meta.json'.format(self.name))
 		self.pairs_tname = '{}_pairs_train'.format(self.name)
 		self.items_tname = '{}_items_train'.format(self.name)
-		if self.net.neg_sample:
-			self.fig_path = os.path.join(self.fig_dir, '{}_neg.png'.format(self.name))
-			self.model_path = os.path.join(self.model_dir, '{}_trainer_neg.pickle'.format(self.name))
 
 		#get item list
-		self.item_ids = utils.json_load(self.meta_path)['item_ids']
-		self.n_unique_items = len(self.item_ids)
-
+		self.n_unique_items = utils.json_load(self.meta_path)['n_unique_items']
+		self.item_ids = list(range(self.n_unique_items))
 		print('Loaded existing model')
 		
 	def test_pass(self):
@@ -157,34 +126,30 @@ class emb_trainer():
 		return vec_batch
 
 	def batch2loss(self, batch):
-		#get index batches
-		word_i_batch = [x[0] for x in batch]
-		context_i_batch = [x[1] for x in batch]
-		label = [x[2] for x in batch]
+		#forward pass
+		item_ids = [item_id for item_id, context_id, label in batch if label==1]
+		item_ids = torch.tensor(item_ids, dtype=torch.long)
+		output = self.net(item_ids)
+		context_vecs = np.array(output.detach())
 
-		#adjust for starting point
-		if self.start_at_1:
-			word_i_batch = [x-1 for x in word_i_batch]
-			context_i_batch = [x-1 for x in context_i_batch]
+		#get neg sampled ground truth
+		con_vec_i = -1
+		for item_id, context_id, label in batch:
+			if label==1:
+				con_vec_i += 1
+			if con_vec_i!=-1:
+				context_vecs[con_vec_i][context_id] = label
 
-		#print(batch, label)
+		#get loss
+		context_vecs = torch.tensor(context_vecs, dtype=torch.float)
+		loss = self.criterion(output, context_vecs)
 
-		#do forward pass & get loss
-		if self.neg_sample:
-			word_i_batch = torch.tensor(word_i_batch, dtype=torch.long)
-			context_i_batch = torch.tensor(context_i_batch, dtype=torch.long)
-			label = torch.tensor(label, dtype=torch.float).unsqueeze(0).view(-1, 1)
-			output = self.net(word_i_batch, context_i_batch)
-			#print(float(output), float(label))
-			loss = self.criterion(output, label)
+		#print('init item id:', item_ids)
+		#print('batch:', batch)
+		#print('context:', context_vecs)
+		#print('context shape:', context_vecs.shape)
+		#print('loss:', loss)
 
-		else:
-			word_i_batch = torch.tensor(word_i_batch, dtype=torch.long)
-			context_vec_batch = self.get_onehot(context_i_batch)
-			output = self.net(word_i_batch)
-			#print(word_i_batch, output, context_vec_batch)
-			loss = self.criterion(output, context_vec_batch)
-		
 		return loss
 
 	def single_epoch(self, i_epoch=0):
@@ -204,6 +169,8 @@ class emb_trainer():
 			loss.backward()
 			self.optimizer.step()
 			i_batch += 1
+
+			#break
 
 		epoch_loss = running_loss / float(i_batch)
 		self.epoch_losses.append(epoch_loss)
@@ -236,7 +203,7 @@ class emb_trainer():
 	
 	def dump_emb(self):
 		cursor = self.conn.cursor()
-		for item_id, embedding in zip(self.item_ids, self.net.word_embeddings.weight.detach()):
+		for item_id, embedding in zip(self.item_ids, self.net.embeddings.weight.detach()):
 			emb_insert = [','.join([str(x) for x in list(embedding.numpy())])]
 			utils.update_table(cursor, emb_insert, 'id', item_id, 'embedding', self.items_tname)
 		self.conn.commit()
