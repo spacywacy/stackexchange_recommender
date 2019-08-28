@@ -8,7 +8,7 @@ from sklearn.manifold import TSNE
 
 class recommender():
 
-	def __init__(self, name, data_dir, db_name):
+	def __init__(self, name, data_dir, db_name, top_k):
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
 		self.pairs_tname = '{}_pairs_train'.format(name)
@@ -19,7 +19,7 @@ class recommender():
 		self.truth_path = '{}_truth.pickle'.format(name)
 		self.truth_path = os.path.join(self.data_dir, self.truth_path)
 
-		self.top_k = 6
+		self.top_k = top_k
 
 	def load_all_emb(self):
 		cursor = self.conn.cursor()
@@ -64,7 +64,7 @@ class recommender():
 		#group by user
 		by_user = {}
 		cursor = self.conn.cursor()
-		utils.read_table(cursor, self.items_tname, cols=['id', 'belong_to'])
+		utils.read_table(cursor, self.items_tname, cols=['id', 'group_id'])
 		for row in cursor:
 			item_id = row[0]
 			user_id = row[1]
@@ -82,7 +82,7 @@ class recommender():
 
 		utils.pickle_dump(self.truth_path, truth)
 
-	def verify(self):
+	def verify(self, show=True):
 		#load items & truth
 		self.load_all_emb()
 		truth = utils.pickle_load(self.truth_path)
@@ -93,7 +93,8 @@ class recommender():
 		for i, emb in enumerate(self.embs):
 			ref_vec = self.get_emb(i)
 			nearest_items = set(self.simple_nearest(ref_vec, self.top_k))
-			print(i, nearest_items, truth[i])
+			if show:
+				print(i, nearest_items, truth[i])
 			for item in truth[i]:
 				if item in nearest_items:
 					correct += 1

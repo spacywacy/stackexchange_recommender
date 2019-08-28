@@ -71,21 +71,21 @@ def store_users(json_items, tname, conn):
 	cursor.close()
 	return n_items
 
-def store_questions(json_items, tname, conn):
+def store_questions(json_items, fav_by, tname, conn):
 	cursor = conn.cursor()
 	n_items = 0
 	for question in json_items:
 		web_id = question.get('question_id', None)
 		title = question.get('title', None)
-		belong_to = question.get('owner', {'user_id':None})['user_id']
+		#belong_to = question.get('owner', {'user_id':None})['user_id']
 		tags = ','.join(question.get('tags', []))
 		view_count = question.get('view_count', None)
 		answer_count = question.get('answer_count', None)
-		row = [web_id, title, belong_to, tags, view_count, answer_count]
+		row = [web_id, title, fav_by, tags, view_count, answer_count]
 		row_str = ''.join([str(x) for x in row])
 		hash_val = md5(row_str.encode()).hexdigest()
 		row += [hash_val]
-		cols = ['web_id', 'title', 'belong_to', 'tags', 'view_count', 'answer_count', 'hash_val']
+		cols = ['web_id', 'title', 'group_id', 'tags', 'view_count', 'answer_count', 'hash_val']
 		insert_row(cursor, tname, row, cols=cols, check_key='hash_val', check_key_val=hash_val)
 		n_items+=1
 	conn.commit()

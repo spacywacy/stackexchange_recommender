@@ -10,7 +10,7 @@ from time import sleep
 
 class stack_api_wrapper():
 
-	def __init__(self, name, db_name, data_dir, n_user_pages, user_pagesize):
+	def __init__(self, name, db_name, data_dir, n_user_pages, user_pagesize, api_tag):
 		#io
 		self.key_loc = 'resources/key'
 		self.result_dir = data_dir
@@ -27,7 +27,8 @@ class stack_api_wrapper():
 		self.n_user_pages = n_user_pages
 		self.user_pagesize = user_pagesize
 		self.n_items_per_user = 100
-		self.delay = 2
+		self.delay = 5
+		self.api_tag = api_tag
 
 		#db
 		self.conn = sqlite3.connect(os.path.join(self.result_dir, db_name))
@@ -91,27 +92,18 @@ class stack_api_wrapper():
 		}
 		
 		#request loop
-		batchsize = self.n_items_per_user
-		prev_i = 0
-		ques_ids = []
-		for i in range(batchsize, len(user_ids)+batchsize, batchsize):
-			print('batch_pos:', i)
-
-			#prep user ids
-			ids_str = ';'.join(user_ids[prev_i:i])
-			prev_i = i
-			url = 'https://api.stackexchange.com/2.2/users/{}/questions'.format(ids_str)
+		i_user = 1
+		for user_id in user_ids:
+			print('get favs for {}th user'.format(i_user))
+			url = 'https://api.stackexchange.com/2.2/users/{}/{}'.format(user_id, self.api_tag)
 
 			#get & store data
 			json_items = utils.call_api(url, params)
-			self.n_items_inserted += utils.store_questions_cache(json_items, self.item_tname, self.conn)
-			ques_ids += [utils.zero_padding(x['question_id']) for x in json_items]
+			self.n_items_inserted += utils.store_questions(json_items, str(user_id), self.item_tname, self.conn)
+			i_user += 1
 
 			#delay
 			sleep(self.delay)
-
-
-
 
 
 class pair_builder():
@@ -119,8 +111,8 @@ class pair_builder():
 	def __init__(self, name, data_dir, db_name, neg_sample_size):
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		#self.items_tname = '{}_items_buffer'.format(name)
-		self.items_tname = '{}_items_train'.format(name)
+		self.items_tname = '{}_items_buffer'.format(name)
+		#self.items_tname = '{}_items_train'.format(name)
 		self.pairs_tname = '{}_pairs_buffer'.format(name)
 
 		#cache

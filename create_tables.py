@@ -13,7 +13,7 @@ def init_tables(name, data_dir, db_name):
 		'{}_pairs_buffer'.format(name)
 	]
 
-	set_autos = [False, True, True, True, True]
+	set_autos = [False, True, True, True, True, True]
 
 	sql_snippets = [
 		'''
@@ -22,7 +22,8 @@ def init_tables(name, data_dir, db_name):
 		name varchar(128),
 		reputation integer,
 		accept_rate integer,
-		hash_val char(32)
+		hash_val char(32),
+		embedding varchar(512)
 		);
 
 		CREATE INDEX {}_hash ON {} (hash_val);
@@ -33,8 +34,8 @@ def init_tables(name, data_dir, db_name):
 		id integer primary key autoincrement,
 		web_id integer,
 		title varchar(512),
-		belong_to integer,
-		embedding varchar(512), /*not sure what dtype to use*/
+		group_id integer, /*user web id*/
+		embedding varchar(512),
 		tags varchar(512),
 		view_count integer,
 		answer_count integer,
@@ -50,8 +51,8 @@ def init_tables(name, data_dir, db_name):
 		id integer primary key autoincrement,
 		web_id integer,
 		title varchar(512),
-		belong_to integer,
-		embedding varchar(512), /*not sure what dtype to use*/
+		group_id integer, /*user web id*/
+		embedding varchar(512), 
 		tags varchar(512),
 		view_count integer,
 		answer_count integer,
@@ -78,7 +79,7 @@ def init_tables(name, data_dir, db_name):
 		context_id integer,
 		label integer
 		);
-		'''.format(tnames[4]) #pairs_buffer_tname
+		'''.format(tnames[4]), #pairs_buffer_tname
 	]
 
 	with sqlite3.connect(os.path.join(data_dir, db_name)) as conn:
