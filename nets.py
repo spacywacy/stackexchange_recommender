@@ -33,3 +33,52 @@ class glove(nn.Module):
 		z = dot + item_bias + context_bias
 		return z
 
+class element_product_(nn.Module):
+
+	def __init__(self, rep_dim=10):
+		super().__init__()
+		self.fc = nn.Linear(rep_dim, 1)
+		self.sigmoid = nn.Sigmoid()
+
+	def forward(self, user_vec, item_vec):
+		z = user_vec * item_vec
+		z = self.sigmoid(self.fc(z))
+		return z
+
+class element_product(nn.Module):
+
+	def __init__(self, rep_dim=25):
+		super().__init__()
+		self.fc1 = nn.Linear(rep_dim, 25)
+		self.fc2 = nn.Linear(25, 1)
+		self.sigmoid = nn.Sigmoid()
+
+	def forward(self, user_vec, item_vec):
+		z = user_vec * item_vec
+		z = self.sigmoid(self.fc1(z))
+		z = self.sigmoid(self.fc2(z))
+		return z
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

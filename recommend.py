@@ -8,7 +8,7 @@ from sklearn.manifold import TSNE
 
 class recommender():
 
-	def __init__(self, name, data_dir, db_name, top_k):
+	def __init__(self, name, data_dir, db_name, top_k, k_embs=float('inf')):
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
 		self.pairs_tname = '{}_pairs_train'.format(name)
@@ -18,19 +18,27 @@ class recommender():
 		self.data_dir = 'storage'
 		self.truth_path = '{}_truth.pickle'.format(name)
 		self.truth_path = os.path.join(self.data_dir, self.truth_path)
+		self.groups_fname = '{}_groups.csv'.format(name)
+		self.groups_path = os.path.join(self.data_dir, self.groups_fname)
 
 		self.top_k = top_k
+		self.k_embs = k_embs
 
 	def load_all_emb(self):
 		cursor = self.conn.cursor()
 		utils.read_table(cursor, self.items_tname, cols=['id', 'embedding'])
 		self.item_ids = []
 		self.embs = []
+		i = 0
 		for row in cursor:
+			if i > self.k_embs:
+				break
+
 			if row[1]:
 				self.item_ids.append(row[0])
 				emb = [float(x) for x in row[1].split(',')]
 				self.embs.append(emb)
+				i+=1
 
 		self.embs = np.array(self.embs)
 		cursor.close()
@@ -60,7 +68,7 @@ class recommender():
 		nearests = sorted(nearests, key=lambda kv: float(kv[1]), reverse=False)[:top_k]
 		return [x[0] for x in nearests]
 
-	def get_truth(self):
+	def get_truth_user(self):
 		#group by user
 		by_user = {}
 		cursor = self.conn.cursor()
@@ -82,6 +90,19 @@ class recommender():
 
 		utils.pickle_dump(self.truth_path, truth)
 
+	def get_truth_related(self):
+		truth = {}
+		with open(self.groups_path, 'r') as f:
+			for line in f:
+				group = line[:-1].split(',')
+				for item in group:
+					truth[item] = truth.get(item, set()).union(set(group))
+
+		for key, val in truth.items():
+			print(key, val)
+		utils.pickle_dump(self.truth_path, truth)
+
+
 	def verify(self, show=True):
 		#load items & truth
 		self.load_all_emb()
@@ -90,15 +111,16 @@ class recommender():
 		#calculate 
 		n = 0.0
 		correct = 0.0
-		for i, emb in enumerate(self.embs):
-			ref_vec = self.get_emb(i)
-			nearest_items = set(self.simple_nearest(ref_vec, self.top_k))
+		i = 0
+		for emb in self.embs:
+			nearest_items = set(self.simple_nearest(emb, self.top_k))
 			if show:
-				print(i, nearest_items, truth[i])
-			for item in truth[i]:
-				if item in nearest_items:
+				print(i, nearest_items, truth[str(i)])
+			for item in truth[str(i)]:
+				if int(item) in nearest_items:
 					correct += 1
 				n+=1
+			i+=1
 		score = correct/n
 		return score
 
@@ -128,6 +150,10 @@ class recommender():
 		plt.ylim(y_min-abs(y_min*0.05), y_max+abs(y_max*0.05))
 		plt.xlim(x_min-abs(x_min*0.05), x_max+abs(x_max*0.05))
 		plt.show()
+
+
+
+
 
 
 

@@ -4,6 +4,7 @@ import pickle
 import os
 import sqlite3
 from hashlib import md5
+import numpy as np
 
 
 def test():
@@ -60,20 +61,22 @@ def store_users(json_items, tname, conn):
 		name = user.get('display_name', None)
 		reputation = user.get('reputation', None)
 		accept_rate = user.get('accept_rate', None)
-		row = [web_id, name, reputation, accept_rate]
+		link = user.get('link', None)
+		row = [web_id, name, reputation, accept_rate, link]
 		row_str = ''.join([str(x) for x in row])
 		hash_val = md5(row_str.encode()).hexdigest()
 		row += [hash_val]
-		cols = ['web_id', 'name', 'reputation', 'accept_rate', 'hash_val']
+		cols = ['web_id', 'name', 'reputation', 'accept_rate', 'link', 'hash_val']
 		insert_row(cursor, tname, row, cols=cols, check_key='hash_val', check_key_val=hash_val)
 		n_items+=1
 	conn.commit()
 	cursor.close()
 	return n_items
 
-def store_questions(json_items, fav_by, tname, conn):
+def store_questions(json_items, tname, conn, group_id=None, return_items=False):
 	cursor = conn.cursor()
-	n_items = 0
+	items = []
+	n_store = 0
 	for question in json_items:
 		web_id = question.get('question_id', None)
 		title = question.get('title', None)
@@ -81,16 +84,24 @@ def store_questions(json_items, fav_by, tname, conn):
 		tags = ','.join(question.get('tags', []))
 		view_count = question.get('view_count', None)
 		answer_count = question.get('answer_count', None)
-		row = [web_id, title, fav_by, tags, view_count, answer_count]
+		if not group_id:
+			group_id = web_id
+		link = question.get('link', None)
+		row = [web_id, title, group_id, tags, view_count, answer_count, link]
 		row_str = ''.join([str(x) for x in row])
 		hash_val = md5(row_str.encode()).hexdigest()
 		row += [hash_val]
-		cols = ['web_id', 'title', 'group_id', 'tags', 'view_count', 'answer_count', 'hash_val']
-		insert_row(cursor, tname, row, cols=cols, check_key='hash_val', check_key_val=hash_val)
-		n_items+=1
+		cols = ['web_id', 'title', 'group_id', 'tags', 'view_count', 'answer_count', 'link', 'hash_val']
+		row_id = insert_row(cursor, tname, row, cols=cols, check_key='hash_val', check_key_val=hash_val)
+		if row_id[1]:
+			n_store += 1
+		items.append(row_id[0])
 	conn.commit()
 	cursor.close()
-	return n_items
+	if return_items:
+		return (items, n_store)
+	else:
+		return n_store
 
 def store_questions_cache(json_items, tname, conn, count_thres=3):
 	cursor = conn.cursor()
@@ -140,11 +151,15 @@ def store_pairs(pairs, tname, conn):
 #------------------database----------------------------
 
 def insert_row(cursor, table_name, row, cols=None, check_key=None, check_key_val=None):
+	#check row
 	if check_key:
-		if check_row(cursor, table_name, check_key, check_key_val):
-			print('Row already exists:', check_key_val)
-			return False
+		row_id = check_row(cursor, table_name, check_key, check_key_val)
+		if row_id:
+			print('Row {} already exists'.format(row_id))
+			#return False
+			return (row_id, False)
 
+	#insert row
 	row_size = len(row)
 	place_holders = ','.join(['?' for x in range(row_size)])
 	if cols == None:
@@ -153,16 +168,20 @@ def insert_row(cursor, table_name, row, cols=None, check_key=None, check_key_val
 		col_str = ','.join(cols)
 		sql_str = 'INSERT INTO {}({}) VALUES ({});'.format(table_name, col_str, place_holders)
 	cursor.execute(sql_str, row)
-	return True
+
+	#get last inserted id
+	cursor.execute('SELECT last_insert_rowid();')
+	row_id = cursor.fetchone()[0]
+	#print('insert row id:', row_id)
+	return (row_id, True)
 
 def check_row(cursor, table_name, key_name, key_val):
-	sql_ = 'SELECT EXISTS(SELECT 1 FROM {} WHERE {}=? LIMIT 1);'.format(table_name, key_name)
+	#sql_ = 'SELECT EXISTS(SELECT 1 FROM {} WHERE {}=? LIMIT 1);'.format(table_name, key_name)
+	sql_ = 'SELECT id FROM {} WHERE {}=? LIMIT 1;'.format(table_name, key_name)
 	cursor.execute(sql_, [key_val])
-	z = cursor.fetchone()[0]
-	if z == 1:
-		return True
-	else:
-		return False
+	rs = cursor.fetchall()
+	if len(rs) > 0:
+		return rs[0][0]
 
 def check_table(conn, table_name):
 	cursor = conn.cursor()
@@ -252,6 +271,22 @@ def move_data(cursor, from_tname, to_tname, delete_original=True):
 
 	#reset auto increment to start at 0
 	set_auto_increment(cursor, from_tname)
+
+def get_emb(conn, tname, id_, use_web_id=False, return_str=False):
+	cursor = conn.cursor()
+	if use_web_id:
+		id_col = 'web_id'
+	else:
+		id_col = 'id'
+
+	sql_ = 'SELECT embedding FROM {} WHERE {}=?;'.format(tname, id_col)
+	cursor.execute(sql_, [id_])
+	result = cursor.fetchall()[0][0]
+	cursor.close()
+	if return_str:
+		return result
+	else:
+		return np.array([float(x) for x in result.split(',')])
 
 	
 

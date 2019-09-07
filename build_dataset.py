@@ -32,7 +32,7 @@ class stack_api_wrapper():
 
 		#db
 		self.conn = sqlite3.connect(os.path.join(self.result_dir, db_name))
-		self.user_tname = '{}_users'.format(name)
+		self.user_tname = '{}_users_buffer'.format(name)
 		self.item_tname = '{}_items_buffer'.format(name)
 
 		#counters
@@ -112,7 +112,6 @@ class pair_builder():
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
 		self.items_tname = '{}_items_buffer'.format(name)
-		#self.items_tname = '{}_items_train'.format(name)
 		self.pairs_tname = '{}_pairs_buffer'.format(name)
 
 		#cache
