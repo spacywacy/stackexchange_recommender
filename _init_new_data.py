@@ -57,11 +57,14 @@ n_epoch = 1000
 #verify
 top_k = 30
 rec = recommender(name, data_dir, db_name, top_k)
-rec.get_truth()
-score = rec.verify()
-print('score:', score)
+#rec.get_truth()
+#score = rec.verify()
+#print('score:', score)
 #print('score: {}, time: {}'.format(score, t1-t0))
 #'''
+
+ref_vec = rec.
+rec.simple_nearest(ref_vec, top_k)
 
 
 

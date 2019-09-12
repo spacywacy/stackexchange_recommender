@@ -2,81 +2,37 @@ import utils
 import os
 import sqlite3
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 from sklearn import metrics
 from nets import element_product
+from nets import concat
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from new_build_dataset import emb_pair_builder
+from train_emb import emb_trainer
 
 
-class classifier():
+class pair_builder():
 
-	def __init__(self, name, data_dir, db_name, neg_sample_size, rep_dim, test_size=0.2):
-		#io
-		self.data_dir = data_dir
-		fav_fname = '{}_fav_lookup.csv'.format(name)
-		self.fav_path = os.path.join(self.data_dir, fav_fname)
-		model_fname = '{}_classifier.pickle'.format(name)
-		self.model_path = os.path.join('bin', model_fname)
+	def __init__(self, groups, dump_tname, conn, name):
+		#input
+		self.groups = groups
+		self.items = []
+
+		#output
+		self.pairs = []
 
 		#db
-		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		self.train_tname = '{}_classify_train'.format(name)
-		self.test_tname = '{}_classify_test'.format(name)
+		self.dump_tname = dump_tname
+		self.db_name = '{}.db'.format(name)
 		self.user_tname = '{}_users_train'.format(name)
 		self.item_tname = '{}_items_train'.format(name)
+		self.conn = conn
 
 		#meta
-		self.neg_sample_size = neg_sample_size
+		self.neg_sample_size = 6
 		self.neg_sample_adjust = .75
-		self.test_size = test_size
-
-		#data prep
-		self.groups = []
-		self.items = []
-		self.pairs_train = []
-		self.pairs_test = []
-		
-		#data
-		self.user_train = []
-		self.item_train = []
-		self.label_train = []
-		self.user_test = []
-		self.item_test = []
-		self.label_test = []
-
-		#classifier
-		self.criterion = nn.BCELoss()
-		self.rep_dim = rep_dim
-
-	def build_dataset(self):
-		self.load_groups()
-		self.counts_and_probs()
-		self.get_pairs()
-		self.dump_pairs()
-		print('train size:', len(self.pairs_train))
-		print('test size:', len(self.pairs_test))
-
-	def load_data(self):
-		self.load_train()
-		self.load_test()
-
-	def build_classifier(self):
-		self.train_classifier()
-		self.conn.close()
-
-	def load_groups(self):
-		with open(self.fav_path, 'r') as f:
-			for line in f:
-				row = line[:-1].split(',')
-				user_web_id = row[0]
-				item_db_ids = [int(x) for x in row[1:]]
-				if len(item_db_ids) == 0:
-					continue
-				self.groups.append([user_web_id, item_db_ids])
-				self.items += item_db_ids
 
 	def alter_probs(self):
 		#denominator
@@ -88,10 +44,12 @@ class classifier():
 		self.item_probs = [(x**self.neg_sample_adjust)/denom for x in self.item_probs]
 
 	def counts_and_probs(self):
-		#get total n_items
-		self.n_items = len(self.items)
+		#get seperate items
+		for user_id, item_ids in self.groups:
+			self.items += item_ids
 
 		#get unique items & item counts
+		self.n_items = len(self.items)
 		self.items, counts = np.unique(self.items, return_counts=True)
 		item_counts = sorted(zip(self.items, counts), key=lambda kv: int(kv[0]), reverse=False)
 		self.items = [x[0] for x in item_counts]
@@ -109,28 +67,20 @@ class classifier():
 		print('unique items:', self.n_unique_items)
 
 	def get_pairs(self):
-		for user_web_id, item_db_ids in self.groups:
-			self.train_test_split(user_web_id, item_db_ids)
+		self.counts_and_probs()
+		for user_id, item_ids in self.groups:
+			user_emb = utils.get_emb(self.conn, self.user_tname, user_id, use_web_id=True, return_str=True)
+			for item_id in item_ids:
+				self.pos_pairs(user_id, user_emb, item_id, item_ids)
+				self.neg_pairs(user_id, user_emb, item_ids)
+		if self.conn:
+			self.dump_pairs()
 
-	def train_test_split(self, user_web_id, item_db_ids):
-		user_emb = utils.get_emb(self.conn, self.user_tname, user_web_id, use_web_id=True, return_str=True)
-		n_test = round(len(item_db_ids) * self.test_size)
-		test_items = np.random.choice(item_db_ids, n_test)
-		for item_id in item_db_ids:
-			if item_id in test_items:
-				self.pos_pairs(user_web_id, user_emb, item_id, item_db_ids, False)
-			else:
-				self.pos_pairs(user_web_id, user_emb, item_id, item_db_ids, True)
-
-	def pos_pairs(self, user_id, user_emb, item_id, context, train):
+	def pos_pairs(self, user_id, user_emb, item_id, context):
 		item_emb = utils.get_emb(self.conn, self.item_tname, item_id, return_str=True)
-		if train:
-			self.pairs_train.append([user_emb, item_emb, 1])
-		else:
-			self.pairs_test.append([user_emb, item_emb, 1])
-		self.neg_pairs(user_id, user_emb, context, train)
+		self.pairs.append([user_id, item_id, user_emb, item_emb, 1])
 
-	def neg_pairs(self, user_id, user_emb, context, train):
+	def neg_pairs(self, user_id, user_emb, context):
 		picked = []
 		for _ in range(self.neg_sample_size):
 			neg_item = ''
@@ -141,67 +91,247 @@ class classifier():
 
 			picked.append(neg_item)
 			neg_item_emb = utils.get_emb(self.conn, self.item_tname, neg_item, return_str=True)
-			if train:
-				self.pairs_train.append([user_emb, neg_item_emb, 0])
-			else:
-				self.pairs_test.append([user_emb, neg_item_emb, 0])
+			self.pairs.append([user_id, neg_item, user_emb, neg_item_emb, 0])
 
 	def dump_pairs(self):
-		cols = ['user_rep', 'item_rep', 'label']
-
-		#insert train set
+		cols = ['user_web_id', 'item_db_id', 'user_rep', 'item_rep', 'label']
 		cursor = self.conn.cursor()
-		for pair in self.pairs_train:
-			utils.insert_row(cursor, self.train_tname, pair, cols=cols)
+		for pair in self.pairs:
+			utils.insert_row(cursor, self.dump_tname, pair, cols=cols)
+		self.conn.commit()
+		cursor.close()
+		print('table name: {}, rows: {}'.format(self.dump_tname, len(self.pairs)))
+
+
+class user_rep():
+
+	def __init__(self, groups, conn, name):
+		#input
+		self.groups = groups
+
+		#db
+		self.conn = conn
+		self.items_tname = '{}_items_train'.format(name)
+		self.users_tname = '{}_users_train'.format(name)
+
+		#merge user buffer data with training data
+		cursor = self.conn.cursor()
+		buffer_users_tname = '{}_users_buffer'.format(name)
+		utils.move_data(cursor, buffer_users_tname, self.users_tname)
 		self.conn.commit()
 		cursor.close()
 
-		#insert test set
+	def build_user_rep(self):
+		i = 0
+		for user_id, item_ids in self.groups:
+			self.single_user(user_id, item_ids, i)
+			i+=1
+
+	def single_user(self, user_id, item_ids, i):
+		#check if user has favs
+		if len(item_ids)==0:
+			print('{}th user({}) has no favorites'.format(i, user_id))
+			return
+
+		#get embedding
+		print('getting rep for {}th user: {}'.format(i, user_id))
+		emb_arr = []
+		for item_id in item_ids:
+			emb = utils.get_emb(self.conn, self.items_tname, item_id)
+			emb_arr.append(emb)
+
+		emb_arr = np.array(emb_arr)
+		user_rep = np.mean(emb_arr, axis=0)
+		user_rep = [','.join([str(x) for x in user_rep])]
+
+		#insert embedding
 		cursor = self.conn.cursor()
-		for pair in self.pairs_test:
-			utils.insert_row(cursor, self.test_tname, pair, cols=cols)
+		utils.update_table(cursor, user_rep, 'web_id', user_id, 'embedding', self.users_tname)
 		self.conn.commit()
 		cursor.close()
 
-	def load_train(self):
-		cursor = self.conn.cursor()
-		cols = ['user_rep', 'item_rep', 'label']
-		utils.read_table(cursor, self.train_tname, cols=cols)
-		for row in cursor:
-			user_rep_vec = [float(x) for x in row[0].split(',')]
-			item_rep_vec = [float(x) for x in row[1].split(',')]
-			self.user_train.append(user_rep_vec)
-			self.item_train.append(item_rep_vec)
-			self.label_train.append(row[-1])
-		cursor.close()
-		self.user_train = torch.tensor(self.user_train, dtype=torch.float)
-		self.item_train = torch.tensor(self.item_train, dtype=torch.float)
-		self.label_train = torch.tensor(self.label_train, dtype=torch.float)
-		self.label_train = self.label_train.unsqueeze(1)
 
-	def load_test(self):
+class user_rep_emb():
+
+	def __init__(self, by_user, conn, name):
+		#input
+		self.name = name
+		self.fav_lookup = by_user
+
+		#db
+		self.conn = conn
+		self.db_name = '{}.db'.format(name)
+		self.user_tname = '{}_users_train'.format(name)
+		self.userpairs_tname = '{}_userpairs_train'.format(name)
+
+		#io
+		self.data_dir = 'storage'
+		self.by_fav_fname = '{}_user_by_fav.csv'.format(name)
+		self.by_fav_path = os.path.join(self.data_dir, self.by_fav_fname)
+
+		#merge user buffer data with training data
+		cursor = self.conn.cursor()
+		buffer_user_tname = '{}_users_buffer'.format(name)
+		utils.move_data(cursor, buffer_user_tname, self.user_tname)
+		self.conn.commit()
+		cursor.close()
+
+		#data
+		self.by_fav = {} #{item_db_id: [user_web_id]}
+
+		#meta
+		self.neg_sample_size = 6
+
+	def build_user_rep(self):
+		self.reverse_lookup()
+		self.build_pairs()
+		self.train_emb()
+
+
+	def reverse_lookup(self):
+		for user_web_id, item_db_ids in self.fav_lookup:
+			user_db_id = utils.user_id_web2db(self.conn, self.user_tname, user_web_id)
+			for item_db_id in item_db_ids:
+				self.by_fav[item_db_id] = self.by_fav.get(item_db_id, []) + [user_db_id]
+		self.by_fav = self.by_fav.values()
+
+		#write by fav to file
+		with open(self.by_fav_path, 'w') as f:
+			for group in self.by_fav:
+				line = ','.join([str(x) for x in group]) + '\n'
+				f.write(line)
+
+	def build_pairs(self):
+		print(self.db_name)
+		print(self.userpairs_tname)
+		emb_pair = emb_pair_builder(self.name,
+									self.data_dir,
+									self.db_name,
+									self.userpairs_tname,
+									self.by_fav_fname,
+									self.neg_sample_size)
+		emb_pair.create_pairs()
+
+	def train_emb(self):
+		lr = 0.01
+		batch_size = 2000
+		n_epoch = 1500
+		emb_dim = 5
+		emb_train = emb_trainer(
+				lr,
+				self.db_name,
+				batch_size,
+				n_epoch,
+				emb_dim,
+				self.userpairs_tname,
+				self.user_tname,
+				'id',
+				name = self.name
+			)
+		emb_train.train_loop()
+
+
+
+class classifier():
+
+	def __init__(self, name, data_dir, db_name, neg_sample_size, rep_dim, test_size=0.2):
+		#io
+		self.data_dir = data_dir
+		fav_fname = '{}_fav_lookup.csv'.format(name)
+		self.fav_path = os.path.join(self.data_dir, fav_fname)
+		model_fname = '{}_classifier.pickle'.format(name)
+		self.model_path = os.path.join('bin', model_fname)
+		fav_train_fname = '{}_fav_train.csv'.format(name)
+		self.fav_train_path = os.path.join(self.data_dir, fav_train_fname)
+
+		#db
+		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
+		self.train_tname = '{}_classify_train'.format(name)
+		self.test_tname = '{}_classify_test'.format(name)
+		self.user_tname = '{}_users_train'.format(name)
+		self.item_tname = '{}_items_train'.format(name)
+
+		#meta
+		self.name = name
+		self.test_size = test_size
+
+		#data prep
+		self.train_groups = {}
+		self.test_groups = {}
+
+		#classifier
+		self.criterion = nn.BCELoss()
+		self.rep_dim = rep_dim
+
+	def build_dataset(self):
+		self.load_groups()
+		self.write_train_favs()
+		user_rep(self.train_groups, self.conn, self.name).build_user_rep()
+		#user_rep_emb(self.train_groups, self.conn, self.name).build_user_rep()
+		pair_builder(self.train_groups, self.train_tname, self.conn, self.name).get_pairs() #build training set
+		pair_builder(self.test_groups, self.test_tname, self.conn, self.name).get_pairs() #build testing set
+
+	def build_classifier(self):
+		self.user_train, self.item_train, self.label_train = self.load_from_db(self.train_tname)
+		self.train_classifier()
+
+	def load_groups(self): #does train test split while loading data
+		with open(self.fav_path, 'r') as f:
+			for line in f:
+				row = line[:-1].split(',')
+				user_web_id = row[0]
+				item_db_ids = [int(x) for x in row[1:]]
+				if len(item_db_ids) == 0:
+					continue
+				self.train_test_split(user_web_id, item_db_ids)
+
+		self.train_groups = self.train_groups.items()
+		self.test_groups = self.test_groups.items()
+
+	def train_test_split(self, user_id, item_ids):
+		n_test = round(len(item_ids) * self.test_size)
+		test_items = np.random.choice(item_ids, n_test)
+		for item_id in item_ids:
+			if item_id in test_items:
+				self.test_groups[user_id] = self.test_groups.get(user_id, []) + [item_id]
+			else:
+				self.train_groups[user_id] = self.train_groups.get(user_id, []) + [item_id]
+
+	def write_train_favs(self):
+		with open(self.fav_train_path, 'w') as f:
+			for user_web_id, item_db_ids in self.train_groups:
+				line = [user_web_id] + item_db_ids
+				line = ','.join([str(x) for x in line]) + '\n'
+				f.write(line)
+
+	def load_from_db(self, tname):
 		cursor = self.conn.cursor()
 		cols = ['user_rep', 'item_rep', 'label']
-		utils.read_table(cursor, self.test_tname, cols=cols)
+		user_xs, item_xs, labels = [], [], []
+		utils.read_table(cursor, tname, cols=cols)
 		for row in cursor:
 			user_rep_vec = [float(x) for x in row[0].split(',')]
 			item_rep_vec = [float(x) for x in row[1].split(',')]
-			self.user_test.append(user_rep_vec)
-			self.item_test.append(item_rep_vec)
-			self.label_test.append(row[-1])
+			user_xs.append(user_rep_vec)
+			item_xs.append(item_rep_vec)
+			labels.append(row[-1])
 		cursor.close()
-		self.user_test = torch.tensor(self.user_test, dtype=torch.float)
-		self.item_test = torch.tensor(self.item_test, dtype=torch.float)
-		self.label_test = torch.tensor(self.label_test, dtype=torch.float)
-		self.label_test = self.label_test.unsqueeze(1)
+		user_xs = torch.tensor(user_xs, dtype=torch.float)
+		item_xs = torch.tensor(item_xs, dtype=torch.float)
+		labels = torch.tensor(labels, dtype=torch.float)
+		labels = labels.unsqueeze(1)
+		return user_xs, item_xs, labels
 
 	def train_classifier(self):
 		net = element_product(rep_dim=self.rep_dim)
+		#net = concat(30, 30)
 		learning_rate = 0.001
-		epoch = 10000
+		epoch = 8000
 		optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 		for i in range(epoch):
 			optimizer.zero_grad()
+			#print(self.user_train)
+			#print(self.item_train)
 			output = net(self.user_train, self.item_train)
 			loss = self.criterion(output, self.label_train)
 			print('epoch: {}, loss: {}'.format(str(i+1), str(float(loss))))
@@ -210,12 +340,13 @@ class classifier():
 		utils.pickle_dump(self.model_path, net)
 
 	def evaluation(self):
+		self.user_test, self.item_test, self.label_test = self.load_from_db(self.test_tname)
 		net = utils.pickle_load(self.model_path)
 		output = net(self.user_test, self.item_test)
 		loss = self.criterion(output, self.label_test)
 		print('cross entropy:', float(loss))
 
-		cutoff = 0.25
+		cutoff = 0.2
 		predicted = []
 		actual = []
 		for y_hat, y in zip(output, self.label_test):
@@ -237,6 +368,14 @@ class classifier():
 		print('accuracy:', accuracy)
 		print('recall:', recall)
 		print('precision:', precision)
+
+
+
+
+
+
+
+
 
 
 

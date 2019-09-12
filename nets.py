@@ -49,15 +49,40 @@ class element_product(nn.Module):
 
 	def __init__(self, rep_dim=25):
 		super().__init__()
-		self.fc1 = nn.Linear(rep_dim, 25)
-		self.fc2 = nn.Linear(25, 1)
+		self.fc1 = nn.Linear(rep_dim, rep_dim)
+		self.fc2 = nn.Linear(rep_dim, rep_dim)
+		self.fc3 = nn.Linear(rep_dim, 1)
+		self.dropout = nn.Dropout(p=.5)
 		self.sigmoid = nn.Sigmoid()
 
 	def forward(self, user_vec, item_vec):
 		z = user_vec * item_vec
-		z = self.sigmoid(self.fc1(z))
-		z = self.sigmoid(self.fc2(z))
+		z = self.dropout(self.sigmoid(self.fc1(z)))
+		z = self.dropout(self.sigmoid(self.fc2(z)))
+		z = self.sigmoid(self.fc3(z))
 		return z
+
+class concat(nn.Module):
+
+	def __init__(self, user_dim, item_dim):
+		super().__init__()
+		dim = user_dim + item_dim
+		self.fc1 = nn.Linear(dim, 100)
+		self.fc2 = nn.Linear(100, 35)
+		self.fc3 = nn.Linear(35, 35)
+		self.fc4 = nn.Linear(35, 1)
+		self.dropout = nn.Dropout(p=.5)
+		self.sigmoid = nn.Sigmoid()
+
+	def forward(self, user_vec, item_vec):
+		z = torch.cat([user_vec, item_vec], dim=1)
+		z = self.dropout(self.sigmoid(self.fc1(z)))
+		z = self.dropout(self.sigmoid(self.fc2(z)))
+		z = self.dropout(self.sigmoid(self.fc3(z)))
+		z = self.sigmoid(self.fc4(z))
+		return z
+
+
 
 
 

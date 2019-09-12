@@ -288,6 +288,14 @@ def get_emb(conn, tname, id_, use_web_id=False, return_str=False):
 	else:
 		return np.array([float(x) for x in result.split(',')])
 
+def user_id_web2db(conn, tname, web_id):
+	cursor = conn.cursor()
+	sql_ = 'SELECT id FROM {} WHERE web_id=?;'.format(tname)
+	cursor.execute(sql_, [web_id])
+	result = cursor.fetchall()[0][0]
+	cursor.close()
+	return result
+
 	
 
 

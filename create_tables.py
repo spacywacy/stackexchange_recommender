@@ -36,7 +36,7 @@ def init_tables(name, data_dir, db_name):
 
 		CREATE INDEX {}_hash ON {} (hash_val);
 		CREATE INDEX {}_web_id ON {} (web_id);
-		'''.format(tnames[0], tnames[0], tnames[0]),
+		'''.format(tnames[0], tnames[0], tnames[0], tnames[0], tnames[0]),
 
 		#user_buffer
 		'''
@@ -53,7 +53,7 @@ def init_tables(name, data_dir, db_name):
 
 		CREATE INDEX {}_hash ON {} (hash_val);
 		CREATE INDEX {}_web_id ON {} (web_id);
-		'''.format(tnames[1], tnames[1], tnames[1]),
+		'''.format(tnames[1], tnames[1], tnames[1], tnames[1], tnames[1]),
 
 		#userpairs_train
 		'''
@@ -137,6 +137,8 @@ def init_tables(name, data_dir, db_name):
 		'''
 		CREATE TABLE {} (
 		id integer primary key autoincrement,
+		user_web_id integer,
+		item_db_id integer,
 		user_rep varchar(512),
 		user_meta varchar(512),
 		item_rep varchar(512),
@@ -149,6 +151,8 @@ def init_tables(name, data_dir, db_name):
 		'''
 		CREATE TABLE {} (
 		id integer primary key autoincrement,
+		user_web_id integer,
+		item_db_id integer,
 		user_rep varchar(512),
 		user_meta varchar(512),
 		item_rep varchar(512),

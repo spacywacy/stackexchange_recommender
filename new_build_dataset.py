@@ -43,8 +43,8 @@ class stack_api_wrapper():
 
 
 	def api_call(self):
-		#self.get_users()
-		#self.ref_items_user()
+		self.get_users()
+		self.ref_items_user()
 		self.context_items()
 		self.conn.close()
 
@@ -203,11 +203,13 @@ class stack_api_wrapper():
 
 class emb_pair_builder():
 
-	def __init__(self, name, data_dir, db_name, neg_sample_size):
+	def __init__(self, name, data_dir, db_name, pairs_tname, groups_fname, neg_sample_size):
 		#db & io
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		self.pairs_tname = '{}_itempairs_buffer'.format(name)
-		self.groups_fname = '{}_groups.csv'.format(name)
+		#self.pairs_tname = '{}_itempairs_buffer'.format(name)
+		self.pairs_tname = pairs_tname
+		#self.groups_fname = '{}_groups.csv'.format(name)
+		self.groups_fname = groups_fname
 		self.result_dir = data_dir
 
 		#cache

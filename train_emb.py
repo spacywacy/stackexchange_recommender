@@ -11,34 +11,33 @@ from sklearn.manifold import TSNE
 import sqlite3
 
 
-class item_emb_trainer():
+class emb_trainer():
 
 	def __init__(self,
 				 alpha,
-				 data_dir,
-				 fig_dir,
-				 model_dir,
 				 db_name,
 				 batch_size,
 				 n_epoch,
 				 emb_dim,
+				 pairs_tname,
+				 items_tname,
+				 dump_id,
 				 n_batch=-1,
 				 name=None,
 				 net_path=None,
 				 early_stop=True
 				 ):
 		#db
-		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
-		self.pairs_tname = '{}_itempairs_train'.format(name)
-		self.items_tname = '{}_items_train'.format(name)
+		self.conn = sqlite3.connect(os.path.join('storage', db_name))
+		self.pairs_tname = pairs_tname
+		self.items_tname = items_tname
+		self.dump_id = dump_id
 
 		#io
-		self.fig_dir = fig_dir
-		self.model_dir = model_dir
-		self.data_dir = data_dir
-		self.fig_path = os.path.join(fig_dir, '{}.png'.format(name))
-		self.model_path = os.path.join(model_dir, '{}_net.pickle'.format(name))
-		self.meta_path = os.path.join(data_dir, '{}_meta.json'.format(name))
+		self.model_dir = 'bin'
+		self.data_dir = 'storage'
+		self.model_path = os.path.join('bin', '{}_{}_net.pickle'.format(name, items_tname))
+		self.meta_path = os.path.join('storage', '{}_{}_meta.json'.format(name, items_tname))
 
 		#init net
 		self.emb_dim = emb_dim
@@ -67,8 +66,12 @@ class item_emb_trainer():
 	def init_new_model(self, name):
 		#merge buffer data with training data
 		cursor = self.conn.cursor()
-		buffer_pairs_tname = '{}_itempairs_buffer'.format(name)
-		buffer_items_tname = '{}_items_buffer'.format(name)
+		buffer_pairs_tname = self.pairs_tname.split('_')
+		buffer_pairs_tname[-1] = 'buffer'
+		buffer_pairs_tname = '_'.join(buffer_pairs_tname)
+		buffer_items_tname = self.items_tname.split('_')
+		buffer_items_tname[-1] = 'buffer'
+		buffer_items_tname = '_'.join(buffer_items_tname)
 		utils.move_data(cursor, buffer_pairs_tname, self.pairs_tname)
 		utils.move_data(cursor, buffer_items_tname, self.items_tname)
 		self.conn.commit()
@@ -209,7 +212,7 @@ class item_emb_trainer():
 		cursor = self.conn.cursor()
 		for item_id, embedding in zip(self.item_ids, self.net.embeddings.weight.detach()):
 			emb_insert = [','.join([str(x) for x in list(embedding.numpy())])]
-			utils.update_table(cursor, emb_insert, 'id', item_id, 'embedding', self.items_tname)
+			utils.update_table(cursor, emb_insert, self.dump_id, item_id, 'embedding', self.items_tname)
 		self.conn.commit()
 		print('Saved embeddings')
 		cursor.close()
@@ -217,6 +220,7 @@ class item_emb_trainer():
 
 
 class user_rep():
+	#deprecated
 
 	def __init__(self, name, db_name, data_dir):
 		#io
