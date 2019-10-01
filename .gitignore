@@ -1,3 +1,6 @@
+.DS_Store
 __pycache__/*
 resources/*
 tests/*
+dep/*
+storage_dev/*

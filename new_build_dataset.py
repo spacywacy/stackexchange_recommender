@@ -6,6 +6,7 @@ import os
 import sqlite3
 import numpy as np
 from time import sleep
+from hashlib import md5
 
 
 class stack_api_wrapper():
@@ -18,6 +19,7 @@ class stack_api_wrapper():
 		self.item_ids_fname = '{}_item_ids.pickle'.format(name)
 		self.groups_fname = '{}_groups.csv'.format(name)
 		self.fav_lookup_fname = '{}_fav_lookup.csv'.format(name)
+		self.new_user_favs_fname = '{}_new_user_favs.csv'.format(name)
 		if not os.path.exists(self.result_dir):
 			os.makedirs(self.result_dir)
 
@@ -36,6 +38,7 @@ class stack_api_wrapper():
 		self.conn = sqlite3.connect(os.path.join(self.result_dir, db_name))
 		self.user_tname = '{}_users_buffer'.format(name)
 		self.item_tname = '{}_items_buffer'.format(name)
+		self.item_train_tname = '{}_items_train'.format(name)
 
 		#counters
 		self.n_users_inserted = 0
@@ -199,6 +202,67 @@ class stack_api_wrapper():
 
 				#delay
 				sleep(self.delay)
+
+	def get_single_user(self, user_web_id):
+		url = 'https://api.stackexchange.com/2.2/users/{}'.format(user_web_id)
+		params = {
+			'order':'desc',
+			'sort':'reputation',
+			'site':self.site,
+			'page':'',
+			'key':self.key
+		}
+		json_items = utils.call_api(url, params)
+		self.n_users_inserted += utils.store_users(json_items, self.user_tname, self.conn)
+
+	def new_user_favs(self, user_web_id):
+		#request header
+		params = {
+			'order':'desc',
+			'sort':'votes',
+			'site':self.site,
+			'key':self.key
+		}
+
+		#data
+		items_in_sys = []
+		new_items = []
+
+		#request for user favs
+		print('getting favs for user: {}'.format(user_web_id))
+		url = 'https://api.stackexchange.com/2.2/users/{}/favorites'.format(user_web_id)
+		json_items = utils.call_api(url, params)
+		
+		#request & store user info
+		self.get_single_user(user_web_id)
+		
+		#check if item in system
+		item_web_ids = [x['question_id'] for x in json_items]
+		for item_web_id in item_web_ids:
+			cursor = self.conn.cursor()
+			hash_val = md5(str(item_web_id).encode()).hexdigest()
+			item_db_id = utils.check_row(cursor, self.item_train_tname, 'hash_val', hash_val)
+
+			#check if item in system
+			if item_db_id or item_db_id==0:
+				items_in_sys.append(item_db_id)
+			else:
+				new_items.append(item_web_id)
+			cursor.close()
+
+		#update favs for the user
+		fav_path = os.path.join(self.result_dir, self.fav_lookup_fname)
+		utils.update_favs_csv(fav_path, user_web_id, items_in_sys)
+
+		#dump new items
+		#to do: insert new item into buffer table
+		#new_fav_path = os.path.join(self.result_dir, self.new_user_favs_fname)
+		#with open(new_fav_path, 'a+') as f:
+			#for item_web_id in new_items:
+				#f.write(str(item_web_id) + '\n')
+
+		#delay
+		sleep(self.delay)
 
 
 class emb_pair_builder():

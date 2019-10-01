@@ -63,7 +63,8 @@ def store_users(json_items, tname, conn):
 		accept_rate = user.get('accept_rate', None)
 		link = user.get('link', None)
 		row = [web_id, name, reputation, accept_rate, link]
-		row_str = ''.join([str(x) for x in row])
+		#row_str = ''.join([str(x) for x in row])
+		row_str = str(web_id)
 		hash_val = md5(row_str.encode()).hexdigest()
 		row += [hash_val]
 		cols = ['web_id', 'name', 'reputation', 'accept_rate', 'link', 'hash_val']
@@ -88,7 +89,8 @@ def store_questions(json_items, tname, conn, group_id=None, return_items=False):
 			group_id = web_id
 		link = question.get('link', None)
 		row = [web_id, title, group_id, tags, view_count, answer_count, link]
-		row_str = ''.join([str(x) for x in row])
+		#row_str = ''.join([str(x) for x in row])
+		row_str = str(web_id)
 		hash_val = md5(row_str.encode()).hexdigest()
 		row += [hash_val]
 		cols = ['web_id', 'title', 'group_id', 'tags', 'view_count', 'answer_count', 'link', 'hash_val']
@@ -147,6 +149,40 @@ def store_pairs(pairs, tname, conn):
 		insert_row(cursor, tname, row, cols=cols)
 	conn.commit()
 	cursor.close()
+
+def update_favs_csv(fpath, user_web_id, new_favs):
+	#this would perform a linear search on the user_favs.csv file,
+	#and basically overwrite the old user_favs file is any editing is required
+	#use a pickled dictionary for user favs in the future
+
+	#load fav into memory
+	favs = []
+	with open(fpath, 'r') as f:
+		for line in f:
+			favs.append(line[:-1].split(','))
+
+	#update favs
+	with open(fpath, 'w') as f:
+		exist = False
+		for row in favs:
+			exist_user = row[0]
+			exist_favs = row[1:]
+			if exist_user == str(user_web_id):
+				write_row = [exist_user] + new_favs
+				write_row = [str(x) for x in write_row]
+				exist = True
+			else:
+				write_row = [str(x) for x in row]
+			line = ','.join(write_row) + '\n'
+			f.write(line)
+		if not exist:
+			row = [str(user_web_id)] + new_favs
+			line = ','.join([str(x) for x in row]) + '\n'
+			f.write(line)
+
+
+
+
 
 #------------------database----------------------------
 
@@ -295,6 +331,13 @@ def user_id_web2db(conn, tname, web_id):
 	result = cursor.fetchall()[0][0]
 	cursor.close()
 	return result
+
+def delete_from_table(conn, tname):
+	cursor = conn.cursor()
+	sql_ = 'DELETE FROM {};'.format(tname)
+	cursor.execute(sql_)
+	conn.commit()
+	cursor.close()
 
 	
 

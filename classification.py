@@ -11,11 +11,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 from new_build_dataset import emb_pair_builder
 from train_emb import emb_trainer
+import matplotlib.pyplot as plt
 
 
 class pair_builder():
 
-	def __init__(self, groups, dump_tname, conn, name):
+	def __init__(self, groups, dump_tname, conn, name, drop_prev_pairs=True):
 		#input
 		self.groups = groups
 		self.items = []
@@ -33,6 +34,10 @@ class pair_builder():
 		#meta
 		self.neg_sample_size = 6
 		self.neg_sample_adjust = .75
+
+		#drop previously pairs
+		if drop_prev_pairs:
+			utils.delete_from_table(conn, dump_tname)
 
 	def alter_probs(self):
 		#denominator
@@ -153,7 +158,7 @@ class user_rep():
 
 class user_rep_emb():
 
-	def __init__(self, by_user, conn, name):
+	def __init__(self, by_user, conn, name, drop_prev_pairs=True):
 		#input
 		self.name = name
 		self.fav_lookup = by_user
@@ -181,6 +186,10 @@ class user_rep_emb():
 
 		#meta
 		self.neg_sample_size = 6
+
+		#drop user pairs from previous run
+		if drop_prev_pairs:
+			utils.delete_from_table(conn, self.userpairs_tname)
 
 	def build_user_rep(self):
 		self.reverse_lookup()
@@ -216,7 +225,7 @@ class user_rep_emb():
 		lr = 0.01
 		batch_size = 2000
 		n_epoch = 1500
-		emb_dim = 5
+		emb_dim = 4
 		emb_train = emb_trainer(
 				lr,
 				self.db_name,
@@ -266,8 +275,8 @@ class classifier():
 	def build_dataset(self):
 		self.load_groups()
 		self.write_train_favs()
-		user_rep(self.train_groups, self.conn, self.name).build_user_rep()
-		#user_rep_emb(self.train_groups, self.conn, self.name).build_user_rep()
+		#user_rep(self.train_groups, self.conn, self.name).build_user_rep()
+		user_rep_emb(self.train_groups, self.conn, self.name).build_user_rep()
 		pair_builder(self.train_groups, self.train_tname, self.conn, self.name).get_pairs() #build training set
 		pair_builder(self.test_groups, self.test_tname, self.conn, self.name).get_pairs() #build testing set
 
@@ -323,10 +332,10 @@ class classifier():
 		return user_xs, item_xs, labels
 
 	def train_classifier(self):
-		net = element_product(rep_dim=self.rep_dim)
-		#net = concat(30, 30)
+		#net = element_product(rep_dim=self.rep_dim)
+		net = concat(4, 30)
 		learning_rate = 0.001
-		epoch = 8000
+		epoch = 2000
 		optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 		for i in range(epoch):
 			optimizer.zero_grad()
@@ -346,7 +355,7 @@ class classifier():
 		loss = self.criterion(output, self.label_test)
 		print('cross entropy:', float(loss))
 
-		cutoff = 0.2
+		cutoff = 0.5
 		predicted = []
 		actual = []
 		for y_hat, y in zip(output, self.label_test):
@@ -369,8 +378,119 @@ class classifier():
 		print('recall:', recall)
 		print('precision:', precision)
 
+	def prob_rank_all(self):
+		k = 10
+		self.user_test, self.item_test, self.label_test = self.load_from_db(self.test_tname)
+		net = utils.pickle_load(self.model_path)
+		output = net(self.user_test, self.item_test)
+		top_items = sorted(zip(output, self.label_test), key=lambda x: x[0], reverse=True)[:k]
+		#for prob, label in top_items:
+			#print(round(float(prob), 3), float(label))
 
+		probs = [float(x[0]) for x in top_items]
+		labels = [float(x[1]) for x in top_items]
+		ap = metrics.average_precision_score(labels, probs)
+		print('average precision @{}: {}'.format(k, ap))
 
+	def prob_rank(self, user_web_id, k):
+		#get data from db
+		user_xs, item_xs, labels = [], [], []
+		cursor = self.conn.cursor()
+		sql_ = '''
+				SELECT user_rep, item_rep, label
+				FROM {}
+				WHERE id != -1
+				AND user_web_id = ?
+				ORDER BY id;
+			   '''.format(self.test_tname)
+		cursor.execute(sql_, [user_web_id])
+		for row in cursor:
+			user_rep_vec = [float(x) for x in row[0].split(',')]
+			item_rep_vec = [float(x) for x in row[1].split(',')]
+			user_xs.append(user_rep_vec)
+			item_xs.append(item_rep_vec)
+			labels.append(row[-1])
+		cursor.close()
+		if len(user_xs)==0:
+			return None
+
+		user_xs = torch.tensor(user_xs, dtype=torch.float)
+		item_xs = torch.tensor(item_xs, dtype=torch.float)
+		labels = torch.tensor(labels, dtype=torch.float)
+		labels = labels.unsqueeze(1)
+
+		#get average precision
+		net = utils.pickle_load(self.model_path)
+		net.eval()
+		output = net(user_xs, item_xs)
+		top_items = sorted(zip(output, labels), key=lambda x: x[0], reverse=True)[:k]
+		probs = [float(x[0]) for x in top_items]
+		labels = [float(x[1]) for x in top_items]
+		ap = metrics.average_precision_score(labels, probs)
+		if not np.isnan(ap):
+			#print('average precision @{} for user {}: {}'.format(k, user_web_id, ap))
+			return ap
+		else:
+			return None
+
+	def prob_rank_by_user(self):
+		#get users
+		cursor = self.conn.cursor()
+		sql_ = 'SELECT web_id FROM {} WHERE id != -1;'.format(self.user_tname)
+		cursor.execute(sql_)
+		user_web_ids = [x[0] for x in cursor.fetchall()]
+		cursor.close()
+
+		#get MAP@K
+		k = 5
+		APs = []
+		for user in user_web_ids:
+			ap = self.prob_rank(user, k)
+			if ap:
+				APs.append(ap)
+		map_at_k = np.array(APs).mean()
+		print('MAP @ K:', map_at_k)
+
+		#plt.hist(APs, bins=20)
+		#plt.show()
+
+	def recommend(self, user_web_id, k):
+		#read item emb
+		item_info = []
+		item_xs = []
+		cursor = self.conn.cursor()
+		sql_ = '''
+				SELECT embedding, title, link
+				FROM {}
+				WHERE id != -1
+				ORDER BY score desc
+				LIMIT 2000;
+			   '''.format(self.item_tname)
+		cursor.execute(sql_)
+		for row in cursor:
+			item_info.append(row[1:])
+			item_emb = [float(x) for x in row[0].split(',')]
+			item_xs.append(item_emb)
+		cursor.close()
+		item_xs = torch.tensor(item_xs, dtype=torch.float)
+
+		#get user emb
+		cursor = self.conn.cursor()
+		sql_ = 'SELECT embedding FROM {} WHERE web_id=?;'.format(self.user_tname)
+		cursor.execute(sql_, [user_web_id])
+		user_emb = cursor.fetchall()[0][0]
+		user_emb = [float(x) for x in user_emb.split(',')]
+		cursor.close()
+		user_xs = [user_emb for x in range(len(item_xs))]
+		user_xs = torch.tensor(user_xs, dtype=torch.float)
+
+		#model pass
+		net = utils.pickle_load(self.model_path)
+		net.eval()
+		output = net(user_xs, item_xs)
+		top_items = sorted(zip(output, item_info), key=lambda x: x[0], reverse=True)[:k]
+		for item in top_items:
+			print(round(float(item[0]),2), item[1][0], item[1][1])
 
 
 

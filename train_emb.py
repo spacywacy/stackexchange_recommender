@@ -87,6 +87,7 @@ class emb_trainer():
 
 		#get u_unique_items
 		self.n_unique_items = len(self.item_ids)
+		print(self.n_unique_items)
 		meta = {'n_unique_items':self.n_unique_items}
 		utils.json_dump(self.meta_path, meta)
 
