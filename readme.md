@@ -8,7 +8,7 @@ Recommender is structured as a classification problem. A four-layer fully connec
 
 Pairs of user-question embeddings are fed into the classifier as inputs, which are separately trained using the Skip-gram model. User embeddings are trained based on the assumption that users who favorite the same question are similar. Question embeddings are trained similarly, using groups of related questions.
 
-Data used is collected via the Stack Exchange public API. Current model is trained on 150 users and 26,000 questions. System allows more data to be collected.
+Data used is collected via the Stack Exchange public API. Current model is trained on 150 users and 26,000 questions. Data from only the site "Cross Validated(stats)" is collected. System allows more data to be collected down the line.
 
 ## Usage
 
@@ -21,6 +21,15 @@ Data used is collected via the Stack Exchange public API. Current model is train
 ```
 $ python _init_user.py [user_id]
 ```
+
+## Get Similar Questions
+
+Question embeddings can be used to retrieve similar questions of a given question. The system calculated distances between the embedding vector of the given question and all other questions stored, and returns the nearest 10 questions.
+
+```
+python _init_similar_questions.py [question_id]
+```
+
 ## Retrain Question Embeddings
 
 Question embeddings can be retrained on new data to get recommendations on recently posted questions.

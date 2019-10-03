@@ -74,6 +74,24 @@ class near():
 		nearests = sorted(nearests, key=lambda kv: float(kv[1]), reverse=False)[:self.k_near]
 		return set([x[0] for x in nearests])
 
+	def similar_items(self, ref_item_id):
+		ref_vec = utils.get_emb(self.conn, self.item_tname, ref_item_id, use_web_id=True)
+		nearests = []
+		cursor = self.conn.cursor()
+		utils.read_table(cursor, self.item_tname, cols=['embedding', 'title', 'link'])
+		for row in cursor:
+			if row[0]:
+				emb = np.array([float(x) for x in row[0].split(',')])
+				title = row[1]
+				link = row[2]
+				d = np.linalg.norm(ref_vec - emb)
+				data_point = (title, link, d)
+				nearests.append(data_point)
+
+		cursor.close()
+		nearests = sorted(nearests, key=lambda kv: float(kv[2]), reverse=False)[:self.k_near]
+		return ['{}, {}'.format(x[0], x[1]) for x in nearests]
+
 	def predict(self, user_web_id, item_db_id):
 		if item_db_id in self.top_k_lookup[user_web_id]:
 			return 1
