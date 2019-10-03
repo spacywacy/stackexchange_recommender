@@ -84,38 +84,42 @@ class stack_api_wrapper():
 		ids_path = os.path.join(self.result_dir, self.user_ids_fname)
 		utils.pickle_dump(ids_path, user_ids)
 
-	def ref_items_raw(self):
+	def ref_items_raw(self, start_date, end_date):
 		#request header
 		url = 'https://api.stackexchange.com/2.2/questions'
 		params = {
 			'order':'desc',
-			'sort':'reputation',
+			'sort':'votes',
 			'site':self.site,
 			'pagesize':self.user_pagesize,
-			'page':'',
+			'fromdate':utils.date_str2unix(start_date),
+			'todate':utils.date_str2unix(end_date),
 			'key':self.key
 		}
 
 		#request loop
-		item_ids = []
+		item_web_ids = []
+		item_db_ids = []
 		for i in range(1, self.n_user_pages+1):
 			print('page:', i)
 			params['page'] = i
 
-			#get data
+			#get & store data to db
 			json_items = utils.call_api(url, params)
-			item_ids_in_loop = [x['question_id'] for x in json_items]
-
-			#append data
-			item_ids += item_ids_in_loop
-			self.n_users_inserted += utils.store_questions(json_items, self.item_tname, self.conn)
+			item_web_ids += [x['question_id'] for x in json_items]
+			tmp_db_ids, n_items = utils.store_questions(json_items,
+														self.item_tname,
+														self.conn,
+														return_items=True)
+			self.n_items_inserted += n_items
+			item_db_ids += tmp_db_ids
 
 			#delay
 			sleep(self.delay)
 
 		#cache user id list
 		ids_path = os.path.join(self.result_dir, self.item_ids_fname)
-		utils.pickle_dump(ids_path, item_ids)
+		utils.pickle_dump(ids_path, list(zip(item_web_ids, item_db_ids)))
 
 	def ref_items_user(self):
 		#load user ids

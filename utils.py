@@ -5,6 +5,8 @@ import os
 import sqlite3
 from hashlib import md5
 import numpy as np
+from datetime import datetime
+import time
 
 
 def test():
@@ -38,6 +40,10 @@ def zero_padding(num, pad_to=6):
 		return zeros + str(num)
 	else:
 		return str(num)
+
+def date_str2unix(datestr):
+	#yyyy-mm-dd
+	return str(int(time.mktime(datetime.strptime(datestr, "%Y-%m-%d").timetuple())))
 
 
 #------------------api&dataset-building----------------------------

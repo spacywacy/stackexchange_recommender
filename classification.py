@@ -12,6 +12,9 @@ import torch.optim as optim
 from new_build_dataset import emb_pair_builder
 from train_emb import emb_trainer
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import normalize
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import scale
 
 
 class pair_builder():
@@ -223,7 +226,7 @@ class user_rep_emb():
 
 	def train_emb(self):
 		lr = 0.01
-		batch_size = 2000
+		batch_size = 7000
 		n_epoch = 1500
 		emb_dim = 4
 		emb_train = emb_trainer(
@@ -252,6 +255,7 @@ class classifier():
 		self.model_path = os.path.join('bin', model_fname)
 		fav_train_fname = '{}_fav_train.csv'.format(name)
 		self.fav_train_path = os.path.join(self.data_dir, fav_train_fname)
+		self.scaler_path = os.path.join(self.data_dir, '{}_scalers.pickle'.format(name))
 
 		#db
 		self.conn = sqlite3.connect(os.path.join(data_dir, db_name))
@@ -263,6 +267,7 @@ class classifier():
 		#meta
 		self.name = name
 		self.test_size = test_size
+		self.norm_input = False
 
 		#data prep
 		self.train_groups = {}
@@ -321,10 +326,29 @@ class classifier():
 		for row in cursor:
 			user_rep_vec = [float(x) for x in row[0].split(',')]
 			item_rep_vec = [float(x) for x in row[1].split(',')]
+
+			#experiment with normalization
+			#user_rep_vec = user_rep_vec/np.linalg.norm(user_rep_vec)
+			#item_rep_vec = item_rep_vec/np.linalg.norm(item_rep_vec)
+
+
 			user_xs.append(user_rep_vec)
 			item_xs.append(item_rep_vec)
 			labels.append(row[-1])
 		cursor.close()
+
+		if self.norm_input:
+			#exp w/ norm
+			#user_xs = normalize(np.array(user_xs), axis=1)
+			#item_xs = normalize(np.array(item_xs), axis=1)
+			user_scaler = StandardScaler()
+			item_scaler = StandardScaler()
+			user_scaler.fit(user_xs)
+			item_scaler.fit(item_xs)
+			user_xs = user_scaler.transform(user_xs)
+			item_xs = item_scaler.transform(item_xs)
+			utils.pickle_dump(self.scaler_path, (user_scaler, item_scaler))
+
 		user_xs = torch.tensor(user_xs, dtype=torch.float)
 		item_xs = torch.tensor(item_xs, dtype=torch.float)
 		labels = torch.tensor(labels, dtype=torch.float)
@@ -335,7 +359,8 @@ class classifier():
 		#net = element_product(rep_dim=self.rep_dim)
 		net = concat(4, 30)
 		learning_rate = 0.001
-		epoch = 2000
+		#learning_rate = 0.005
+		epoch = 4000
 		optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 		for i in range(epoch):
 			optimizer.zero_grad()
@@ -413,6 +438,13 @@ class classifier():
 		cursor.close()
 		if len(user_xs)==0:
 			return None
+
+		#exp w/ norm
+		if self.norm_input:
+			user_scaler, item_scaler = utils.pickle_load(self.scaler_path)
+			user_xs = user_scaler.transform(user_xs)
+			item_xs = item_scaler.transform(item_xs)
+			print(np.array(user_xs))
 
 		user_xs = torch.tensor(user_xs, dtype=torch.float)
 		item_xs = torch.tensor(item_xs, dtype=torch.float)

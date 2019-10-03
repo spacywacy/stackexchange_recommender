@@ -25,7 +25,6 @@ conn = sqlite3.connect(os.path.join(data_dir, db_name))
 t0 = time()
 
 #update favs
-#new_user_id = '250448'
 new_user_id = sys.argv[1]
 api_wrapper = stack_api_wrapper(name, db_name, data_dir, None, None)
 api_wrapper.new_user_favs(new_user_id)

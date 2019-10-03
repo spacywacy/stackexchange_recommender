@@ -69,7 +69,7 @@ cla_neg_size = 6
 emb_dim = 30
 cla = classifier(name, data_dir, db_name, cla_neg_size, emb_dim)
 #cla.build_dataset()
-#cla.build_classifier()
+cla.build_classifier()
 #cla.evaluation()
 cla.prob_rank_by_user()
 
